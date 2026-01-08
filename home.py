@@ -1,103 +1,82 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
-import time
+from pathlib import Path
+from utils.db import add_file, file_exists, get_user_files, delete_file
+from auth import require_login
+from datetime import datetime
+import hashlib
+from PIL import Image
+from streamlit_image_gallery import streamlit_image_gallery
+import base64
+from io import BytesIO
+import glob
+# ---------------- 登入保護 ----------------
 def app():
-    st.markdown("#首頁")
-    st.write("""# My first app Hello *world!*""")
-    df = pd.DataFrame(
-        {
-        'first column':[1,2,3,4],
-        'second column':[10,20,30,40]
-        })
-    st.write(df) # interactive table
-    st.table(df) # static table
-    dataframe = pd.DataFrame(
-        np.random.randn(10,20),
-        columns=('col %d' % i for i in range(20))
-        )
-    st.dataframe(dataframe.style.highlight_max(axis=0))
+    require_login()
 
-    # Draw a line chart
-    chart_data = pd.DataFrame(
-        np.random.randn(20,3),
-        columns=['a','b','c']
-    )
-    st.line_chart(chart_data)
+    # 取得登入使用者資訊
+    current_user = st.session_state.get("username")
+    user_id = st.session_state.get("user_id")
+    if not current_user or not user_id:
+        st.warning("請先登入！")
+        st.stop()
 
-    # Plot a map
-    map_data = pd.DataFrame(
-        np.random.randn(1000,2)/[50,50] + [37.76,-122.4],
-        columns=['lat','lon']
-    )
-    st.map(map_data)
+    st.subheader("🏠 主頁面")
 
-    # Widgets (slider)
-    x = st.slider('x')
-    st.write(x,'squared is', x*x)
-
-    # Widgets (text_input)
-    st.text_input("Your name",key="name")
-    st.session_state.name
-
-    # Use checkboxes to show/hide data
-    if st.checkbox('Show dataframe'):
-        chart_data
-
-    # Use a selectbox for options
-    option = st.selectbox(
-        'Which number do you like best?',
-        df['first column'] 
-    )
-    'You selected: ', option
-
-    # layout
-    add_selectbox = st.sidebar.selectbox(
-        'How would you like to be contacted?',
-        ('Email','Home phone','Mobile phone')
+    # ---------------- 上傳圖片 ----------------
+    st.subheader("📤 上傳圖片（可多選）")
+    uploaded_files = st.file_uploader(
+        "",
+        type=["png", "jpg", "jpeg", "gif"],
+        accept_multiple_files=True,
+        key="uploaded_files_multi"
     )
 
-    add_slider = st.sidebar.slider(
-        'Select a range of values',
-        0.0, 100.0, (25.0,75.0)
-    )
+    # 暫存上傳檔案
+    if uploaded_files:
+        st.session_state['pending_uploads'] = uploaded_files
 
-    left_column, right_column = st.columns(2)
-    left_column.button('Press me!')
+    pending = st.session_state.get('pending_uploads', [])
 
-    with right_column:
-        chosen = st.radio(
-            'sorting hat',
-            ("gryffindor","Ravenclaw","Hufflepuff","SLytherin"),
-        )
-        st.write(f"You are in {chosen} house!")
+    if st.button("開始上傳", key="upload_button"):
+        if not pending:
+            st.info("沒有檔案可上傳")
+        else:
+            uploads_dir = Path("uploads") / str(user_id)
+            uploads_dir.mkdir(parents=True, exist_ok=True)
 
-    latest_iteration = st.empty()
-    bar = st.progress(0)
-    for i in range(10):
-        latest_iteration.text(f'Iteration{i+1}')
-        bar.progress(i+1)
-        time.sleep(0.1)
-    'and now we\'re done!'
+            total_files = len(pending)
+            progress_bar = st.progress(0)
+            status_text = st.empty()
 
-    #st.cache_data 儲存 str, int, float, Dataframe, dict, list
-    #st.cache_source 儲存 ML_models, database connections
+            for idx, uploaded_file in enumerate(pending, start=1):
+                file_bytes = uploaded_file.getbuffer()
+                file_hash = hashlib.sha256(file_bytes).hexdigest()
 
-    @st.cache_data
-    def long_running_function(param1,param2):
-        return ...
+                # 已存在就跳過
+                if file_exists(user_id, file_hash):
+                    status_text.text(f"跳過已存在檔案：{uploaded_file.name}")
+                    progress_bar.progress(idx / total_files)
+                    continue
 
-    if "counter" not in st.session_state:
-        st.session_state.counter = 0 
-    st.session_state.counter +=1
-    st.header(f"This page has run {st.session_state.counter} times")
-    st.button("Run it again")
+                timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                file_path = uploads_dir / f"{timestamp}_{uploaded_file.name}"
 
-    if "df" not in st.session_state:
-        st.session_state.df = pd.DataFrame(
-            np.random.randn(20,2),columns=["x","y"]
-        )
-    st.header("Choose a datapoint color")
-    color = st.color_picker("Color","#FF0000")
-    st.divider()
-    st.scatter_chart(st.session_state.df,x="x",y="y",color=color)
+                with open(file_path, "wb") as f:
+                    f.write(file_bytes)
+
+                add_file(user_id, file_path.name, file_hash)
+                progress_bar.progress(idx / total_files)
+                status_text.text(f"上傳 {uploaded_file.name} 完成")
+
+            status_text.text("🎉 所有圖片處理完成")
+            st.success("圖片上傳完成！")
+            st.session_state['pending_uploads'] = []  # ✅ 清空暫存
+
+    st.subheader("📂 已上傳圖片")
+    def load_images():
+        image_files = glob.glob("*.jpg")
+        st.write(len(image_files))
+        for image_file in image_files:
+            st.wrtie(image_file)
+        return  
+    image_files = load_images()

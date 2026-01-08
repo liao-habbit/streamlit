@@ -6,7 +6,7 @@ def require_login():
 
 def logout_button():
     with st.sidebar:
-        st.markdown(f"### 👤 使用者 {st.session_state.get("user","")}")
+        st.markdown(f"### 👤 使用者 {st.session_state.get("username","")}")
         if st.button("🚪 登出"):
             st.session_state.clear()
             st.switch_page("pages/login.py")
